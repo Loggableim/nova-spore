@@ -1,0 +1,16 @@
+[Unit]
+Description=Nova Spore Coordinator — Heartbeat & Relay Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/nova-coordinator
+ExecStart=/usr/bin/python3 /root/nova-coordinator/server.py
+Restart=always
+RestartSec=5
+Environment=COORDINATOR_PORT=3457
+
+[Install]
+WantedBy=multi-user.target

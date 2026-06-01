@@ -102,7 +102,7 @@ class CoordinatorHandler(BaseHTTPRequestHandler):
                 "uptime": time.time() - self.server.start_time,
             })
 
-        elif path == "/":
+        elif path in ("", "/"):
             self._json({
                 "nova": "spore-coordinator",
                 "version": "0.1.0",

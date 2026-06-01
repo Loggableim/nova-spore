@@ -99,6 +99,13 @@ _MASTER_IDENTITY: NovaIdentity | None = None
 def get_master_identity() -> NovaIdentity:
     global _MASTER_IDENTITY
     if _MASTER_IDENTITY is None:
+        # Erstens: Umgebungsvariable (für CI/Deployment)
+        env_seed = os.environ.get("NOVA_SEED")
+        if env_seed:
+            _MASTER_IDENTITY = NovaIdentity.from_seed(env_seed)
+            return _MASTER_IDENTITY
+        
+        # Zweitens: Seed-File
         seed_file = Path(__file__).parent.parent / ".nova_seed"
         if seed_file.exists():
             seed_b64 = seed_file.read_text().strip()
