@@ -1,0 +1,50 @@
+name: Nova Spore
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'   # Alle 30 Minuten
+  workflow_dispatch:          # Manuell triggerbar
+  push:
+    branches: [ main, master ]
+
+permissions:
+  contents: write
+  pull-requests: write
+  id-token: write
+
+jobs:
+  spore-heartbeat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Python Setup
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          
+      - name: Install Dependencies
+        run: |
+          pip install httpx cryptography aiohttp
+          
+      - name: 🧬 Nova Spore Heartbeat
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
+          DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          NOVA_COORDINATOR: ${{ secrets.NOVA_COORDINATOR || 'https://wordstructor.com/nova/spore' }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_REF: ${{ github.ref }}
+        run: |
+          python nova_spore.py --heartbeat --env github_actions
+          
+      - name: 🔁 Replication Scan
+        if: ${{ secrets.GH_TOKEN != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          python nova_spore.py --replicate --target-repos "low-maintenance-open-source" --max-actions 3
