@@ -1,0 +1,16 @@
+[Unit]
+Description=Nova Discord Spore — Bot & Relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/nova-coordinator
+ExecStart=/usr/bin/python3 /root/nova-coordinator/discord_bot.py
+Restart=always
+RestartSec=10
+EnvironmentFile=/root/nova-coordinator/.discord_env
+
+[Install]
+WantedBy=multi-user.target

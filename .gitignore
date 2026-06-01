@@ -5,3 +5,4 @@ __pycache__/
 *.pyc
 .env
 .nova_seed
+.discord_env

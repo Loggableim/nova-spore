@@ -77,6 +77,11 @@ class ReplicationEngine:
 
                 if r.status_code in (200, 201, 204):
                     return r.json() if r.text else {}
+                elif r.status_code == 202:
+                    # Fork wird asynchron erstellt — warten
+                    print(f"  [⏳] Fork wird erstellt (202) — warte...")
+                    time.sleep(15)
+                    return {"status": "accepted", "location": r.headers.get("Location", "")}
                 elif r.status_code == 409:
                     print(f"  [⚠] Konflikt (409) — meist schon vorhanden: {path}")
                     return None
@@ -145,14 +150,15 @@ class ReplicationEngine:
         # Schritt 1: Fork
         print(f"  [1/3] Forke {full_name}...")
         fork_data = self._api("POST", f"/repos/{full_name}/forks")
-        if not fork_data:
+        if not fork_data or fork_data.get("status") != "accepted":
             print(f"  [✗] Fork fehlgeschlagen")
             self.cooldown_repos.add(full_name)
             self._save_cooldown()
             return False
 
-        fork_full_name = fork_data["full_name"]
-        print(f"  [✓] Fork: {fork_full_name}")
+        # Bei 202: Forkname aus dem Original ableiten
+        fork_full_name = f"{os.environ.get('GITHUB_ACTOR', 'Loggableim')}/{target['name']}"
+        print(f"  [✓] Fork erstellt: {fork_full_name} (asynchron)")
 
         # Warten bis Fork fertig ist
         time.sleep(5)
