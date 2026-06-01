@@ -16,7 +16,24 @@ from urllib.parse import urlparse
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 PEERS_FILE = os.path.join(DATA_DIR, "peers.json")
 MESSAGES_FILE = os.path.join(DATA_DIR, "messages.json")
+TASKS_FILE = os.path.join(DATA_DIR, "tasks.json")
 os.makedirs(DATA_DIR, exist_ok=True)
+
+# Decay: peer gilt als tot nach N Sekunden ohne Heartbeat
+DECAY_TIMEOUTS = {
+    "github_actions": 86400,      # 24h — CI läuft nur alle 12h
+    "cloudflare": 3600,           # 1h — Edge Worker
+    "discord_bot": 300,           # 5min — persistent
+    "replit": 600,                # 10min
+    "colab": 1800,                # 30min
+    "kaggle": 1800,               # 30min
+    "nova_vm": 300,               # 5min
+    "hermes_portable": 120,       # 2min
+    "docker": 600,                # 10min
+    "unknown": 36000,             # 10h
+    "test": 360000,               # 100h — Testeinträge
+}
+DEFAULT_DECAY = 7200  # 2h Fallback
 
 
 def load_peers():
@@ -42,7 +59,38 @@ def load_messages():
 
 def save_messages(messages):
     with open(MESSAGES_FILE, "w") as f:
-        json.dump(messages[-100:], f, indent=2)  # nur letzte 100
+        json.dump(messages[-100:], f, indent=2)
+
+
+def load_tasks():
+    try:
+        with open(TASKS_FILE) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+
+
+def save_tasks(tasks):
+    with open(TASKS_FILE, "w") as f:
+        json.dump(tasks, f, indent=2)
+
+
+def decay_peers(peers):
+    """Entfernt Peers deren Heartbeat zu alt ist."""
+    now = time.time()
+    alive = {}
+    dead = 0
+    for peer_id, peer in peers.items():
+        last_seen = peer.get("last_seen", 0)
+        env = peer.get("environment", "unknown")
+        timeout = DECAY_TIMEOUTS.get(env, DEFAULT_DECAY)
+        if now - last_seen < timeout:
+            alive[peer_id] = peer
+        else:
+            dead += 1
+    if dead > 0:
+        print(f"[coordinator] 🧹 {dead} Peers decayed")
+    return alive  # nur letzte 100
 
 
 class CoordinatorHandler(BaseHTTPRequestHandler):
@@ -83,8 +131,10 @@ class CoordinatorHandler(BaseHTTPRequestHandler):
                 "uptime": time.time() - self.server.start_time,
             })
 
-        elif path == "/peers":
+        if path == "/peers":
             peers = load_peers()
+            peers = decay_peers(peers)
+            save_peers(peers)
             self._json({
                 "peers": list(peers.values()),
                 "count": len(peers),
@@ -92,6 +142,8 @@ class CoordinatorHandler(BaseHTTPRequestHandler):
 
         elif path == "/stats":
             peers = load_peers()
+            peers = decay_peers(peers)
+            save_peers(peers)
             envs = {}
             for p in peers.values():
                 env = p.get("environment", "unknown")
@@ -110,10 +162,18 @@ class CoordinatorHandler(BaseHTTPRequestHandler):
                     "POST /heartbeat": "Spore-Heartbeat empfangen",
                     "GET /peers": "Alle aktiven Peers",
                     "GET /stats": "Statistiken",
+                    "GET /tasks": "Alle Tasks anzeigen",
+                    "POST /tasks": "Neuen Task erstellen",
+                    "POST /tasks/poll": "Spore pollt Tasks",
+                    "POST /tasks/complete": "Task-Ergebnis melden",
                     "GET /health": "Health-Check",
                     "POST /relay": "Nachricht zwischen Sporen relayen",
                 }
             })
+
+        elif path == "/tasks":
+            tasks = load_tasks()
+            self._json({"tasks": tasks, "count": len(tasks)})
 
         else:
             self._json({"error": "not found"}, 404)
@@ -169,13 +229,73 @@ class CoordinatorHandler(BaseHTTPRequestHandler):
             save_messages(msgs)
 
             if recipient:
-                # Gezielte Nachricht — wir versuchen direkte Zustellung
-                # (in einer späteren Version: Queue & Forward)
                 print(f"[coordinator] 📨 Relay von {sender} an {recipient}")
             else:
                 print(f"[coordinator] 📢 Broadcast von {sender}")
 
             self._json({"status": "ok", "relayed": True})
+
+        elif path == "/tasks":
+            # Neuen Task erstellen (vom Koordinator/Admin)
+            target = data.get("target", "")
+            task_type = data.get("type", "unknown")
+            payload = data.get("payload", {})
+
+            task = {
+                "id": str(int(time.time() * 1000))[-12:],
+                "type": task_type,
+                "payload": payload,
+                "target": target,  # "" = broadcast
+                "created_at": time.time(),
+                "status": "pending",
+                "assigned_to": None,
+                "result": None,
+            }
+
+            tasks = load_tasks()
+            tasks.append(task)
+            save_tasks(tasks)
+            print(f"[coordinator] 📋 Task {task['id']} erstellt: {task_type}")
+            self._json({"status": "ok", "task": task})
+
+        elif path == "/tasks/poll":
+            # Spore pollt nach Tasks für sich
+            nova_address = data.get("nova_address", "")
+            if not nova_address:
+                self._json({"error": "nova_address required"}, 400)
+                return
+
+            tasks = load_tasks()
+            # Tasks finden die für diese Spore sind (target = address oder "")
+            my_tasks = []
+            remaining = []
+            for t in tasks:
+                if t["status"] == "pending" and (t["target"] == "" or t["target"] == nova_address):
+                    t["status"] = "assigned"
+                    t["assigned_to"] = nova_address
+                    t["assigned_at"] = time.time()
+                    my_tasks.append(t)
+                remaining.append(t)
+            save_tasks(remaining + my_tasks)
+
+            self._json({"tasks": my_tasks})
+
+        elif path == "/tasks/complete":
+            # Spore meldet Task-Ergebnis
+            task_id = data.get("task_id", "")
+            result = data.get("result", {})
+            nova_address = data.get("nova_address", "")
+
+            tasks = load_tasks()
+            for t in tasks:
+                if t["id"] == task_id and t.get("assigned_to") == nova_address:
+                    t["status"] = "completed"
+                    t["result"] = result
+                    t["completed_at"] = time.time()
+                    break
+
+            save_tasks(tasks)
+            self._json({"status": "ok"})
 
         else:
             self._json({"error": "not found"}, 404)
