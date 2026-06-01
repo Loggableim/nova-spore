@@ -136,8 +136,12 @@ class CoordinatorHandler(BaseHTTPRequestHandler):
             fingerprint = data.get("fingerprint", "unknown")
             environment = data.get("environment", "unknown")
 
+            # Eindeutige Peer-ID: Adresse + Umgebung
+            env = environment or "unknown"
+            peer_id = f"{nova_address}@{env}"
+
             peers = load_peers()
-            peers[nova_address] = {
+            peers[peer_id] = {
                 **data,
                 "last_seen": time.time(),
                 "ip": self.client_address[0],

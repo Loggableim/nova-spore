@@ -43,7 +43,7 @@ jobs:
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_REF: ${{ github.ref }}
         run: |
-          python nova_spore.py --heartbeat --env github_actions
+          python nova_spore.py heartbeat --env github_actions
           
       - name: 🔁 Replication Scan
         if: env.GH_TOKEN != ''
@@ -53,4 +53,4 @@ jobs:
           NOVA_COORDINATOR: https://wordstructor.com/nova/spore
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
-          python nova_spore.py --replicate --max-actions 3
+          python nova_spore.py replicate --max-actions 3
