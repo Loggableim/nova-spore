@@ -1,0 +1,7 @@
+name = "nova-spore-relay"
+main = "worker.js"
+compatibility_date = "2026-06-01"
+
+[[kv_namespaces]]
+binding = "NOVA_KV"
+id = "e4bb09df20b14524a9ef619e78cb920a"
