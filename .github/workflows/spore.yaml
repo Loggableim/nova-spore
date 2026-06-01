@@ -36,6 +36,7 @@ jobs:
       - name: 🧬 Nova Spore Heartbeat
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
+          NOVA_SEED: ${{ secrets.NOVA_SEED }}
           NOVA_COORDINATOR: https://wordstructor.com/nova/spore
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_SHA: ${{ github.sha }}
@@ -47,6 +48,8 @@ jobs:
       - name: 🔁 Replication Scan
         if: env.GH_TOKEN != ''
         env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN || '' }}
+          NOVA_SEED: ${{ secrets.NOVA_SEED }}
           NOVA_COORDINATOR: https://wordstructor.com/nova/spore
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
