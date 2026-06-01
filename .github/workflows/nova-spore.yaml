@@ -17,6 +17,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     
+    env:
+      GH_TOKEN: ${{ secrets.GH_TOKEN || '' }}
+      NOVA_SEED: ${{ secrets.NOVA_SEED || '' }}
+
     steps:
       - uses: actions/checkout@v4
       
@@ -37,14 +41,13 @@ jobs:
           GITHUB_SHA: ${{ github.sha }}
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_REF: ${{ github.ref }}
-          NOVA_SEED: ${{ secrets.NOVA_SEED }}
         run: |
           python nova_spore.py --heartbeat --env github_actions
           
       - name: 🔁 Replication Scan
-        if: ${{ secrets.GH_TOKEN != '' }}
+        if: env.GH_TOKEN != ''
         env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-          NOVA_SEED: ${{ secrets.NOVA_SEED }}
+          NOVA_COORDINATOR: https://wordstructor.com/nova/spore
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           python nova_spore.py --replicate --max-actions 3
